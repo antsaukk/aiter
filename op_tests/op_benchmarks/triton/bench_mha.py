@@ -368,6 +368,10 @@ def run_benchmark(custom, args):
                 flops_per_matmul = 2.0 * BATCH * HQ * N_CTX_Q * N_CTX_K * D_HEAD
 
         # Benchmark mode
+        MAPPING_AITER = 0
+        MAPPING_HEAD_FIRST = 1
+        MAPPING_TRITON_FA = 2
+        
         if varlen:
             if args.fp8:
 
@@ -432,6 +436,8 @@ def run_benchmark(custom, args):
                         causal=causal,
                         return_lse=return_lse,
                         return_attn_probs=return_attn_probs,
+                        mapping_mode=args.mapping_mode, 
+                        use_remap=args.use_remap,
                     )
 
         if mode == "bwd":
@@ -572,6 +578,20 @@ def parse_args():
         default=None,
         help="Enable persistent kernels. Use '-persistent dynamic' for dynamic scheduling of the tiles.",
     )
+    parser.add_argument(
+        "-mapping_mode", 
+        type=int, 
+        default=0, 
+        choices=[0, 1, 2],
+        help="Mapping mode: 0=aiter_fa, 1=head_first, 2=triton_fa"
+    )
+    parser.add_argument(
+        "-no_remap",
+        action="store_false",
+        dest="use_remap",
+        help="Disable remap functionality (only applies to aiter mode)"
+    )
+
     return parser.parse_args()
 
 
