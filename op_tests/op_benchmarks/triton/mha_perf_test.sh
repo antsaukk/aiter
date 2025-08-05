@@ -1,34 +1,61 @@
 #!/bin/bash
 
+# Define configurations for d_head=56
+CONFIGS_DHEAD_56=(
+    "1,128,128,2048,2048,56,bshd,,seq_2048"
+    "1,128,128,4096,4096,56,bshd,,seq_4096"
+    "1,128,128,8192,8192,56,bshd,,seq_8192"
+    #"1,128,128,16384,16384,56,bshd,,seq_16384"
+    #"1,128,128,32768,32768,56,bshd,,seq_32768"
+    #"1,128,128,65536,65536,56,bshd,,seq_65536"
+    #"1,128,128,131072,131072,56,bshd,,seq_131072"
+)
+
 # Define configurations for d_head=128
 CONFIGS_DHEAD_128=(
-    "1,32,8,2048,2048,128,bshd,,seq_2048_h32"
-    "1,32,8,4096,4096,128,bshd,,seq_4096_h32"
-    "1,32,8,8192,8192,128,bshd,,seq_8192_h32"
-    "1,32,8,16384,16384,128,bshd,,seq_16384_h32"
-    "1,32,8,32768,32768,128,bshd,,seq_32768_h32"
-    "1,32,8,65536,65536,128,bshd,,seq_65536_h32"
-    "1,32,8,131072,131072,128,bshd,,seq_131072_h32"
+    "1,8,8,2048,2048,128,bshd,,seq_2048_h8"
+    "1,8,8,4096,4096,128,bshd,,seq_4096_h8"
+    "1,8,8,8192,8192,128,bshd,,seq_8192_h8"
+    #"1,8,8,16384,16384,128,bshd,,seq_16384_h8"
+    #"1,8,8,32768,32768,128,bshd,,seq_32768_h8"
+    #"1,8,8,65536,65536,128,bshd,,seq_65536_h8"
+    #"1,8,8,131072,131072,128,bshd,,seq_131072_h8"
     
-    "1,64,8,2048,2048,128,bshd,,seq_2048_h64"
-    "1,64,8,4096,4096,128,bshd,,seq_4096_h64"
-    "1,64,8,8192,8192,128,bshd,,seq_8192_h64"
-    "1,64,8,16384,16384,128,bshd,,seq_16384_h64"
-    "1,64,8,32768,32768,128,bshd,,seq_32768_h64"
-    "1,64,8,65536,65536,128,bshd,,seq_65536_h64"
-    "1,64,8,131072,131072,128,bshd,,seq_131072_h64"
+    "1,16,16,2048,2048,128,bshd,,seq_2048_h16"
+    "1,16,16,4096,4096,128,bshd,,seq_4096_h16"
+    "1,16,16,8192,8192,128,bshd,,seq_8192_h16"
+    #"1,16,16,16384,16384,128,bshd,,seq_16384_h16"
+    #"1,16,16,32768,32768,128,bshd,,seq_32768_h16"
+    #"1,16,16,65536,65536,128,bshd,,seq_65536_h16"
+    #"1,16,16,131072,131072,128,bshd,,seq_131072_h16"
     
-    "1,128,8,2048,2048,128,bshd,,seq_2048_h128"
-    "1,128,8,4096,4096,128,bshd,,seq_4096_h128"
-    "1,128,8,8192,8192,128,bshd,,seq_8192_h128"
-    "1,128,8,16384,16384,128,bshd,,seq_16384_h128"
-    "1,128,8,32768,32768,128,bshd,,seq_32768_h128"
-    "1,128,8,65536,65536,128,bshd,,seq_65536_h128"
-    "1,128,8,131072,131072,128,bshd,,seq_131072_h128"
+    "1,32,32,2048,2048,128,bshd,,seq_2048_h32"
+    "1,32,32,4096,4096,128,bshd,,seq_4096_h32"
+    "1,32,32,8192,8192,128,bshd,,seq_8192_h32"
+    #"1,32,32,16384,16384,128,bshd,,seq_16384_h32"
+    #"1,32,32,32768,32768,128,bshd,,seq_32768_h32"
+    #"1,32,32,65536,65536,128,bshd,,seq_65536_h32"
+    #"1,32,32,131072,131072,128,bshd,,seq_131072_h32"
+    
+    "1,64,64,2048,2048,128,bshd,,seq_2048_h64"
+    "1,64,64,4096,4096,128,bshd,,seq_4096_h64"
+    "1,64,64,8192,8192,128,bshd,,seq_8192_h64"
+    #"1,64,64,16384,16384,128,bshd,,seq_16384_h64"
+    #"1,64,64,32768,32768,128,bshd,,seq_32768_h64"
+    #"1,64,64,65536,65536,128,bshd,,seq_65536_h64"
+    #"1,64,64,131072,131072,128,bshd,,seq_131072_h64"
+    
+    "1,128,128,2048,2048,128,bshd,,seq_2048_h128"
+    "1,128,128,4096,4096,128,bshd,,seq_4096_h128"
+    "1,128,128,8192,8192,128,bshd,,seq_8192_h128"
+    #"1,128,128,16384,16384,128,bshd,,seq_16384_h128"
+    #"1,128,128,32768,32768,128,bshd,,seq_32768_h128"
+    #"1,128,128,65536,65536,128,bshd,,seq_65536_h128"
+    #"1,128,128,131072,131072,128,bshd,,seq_131072_h128"
 )
 
 # Define d_head values  
-DHEAD_VALUES=(128)
+DHEAD_VALUES=(56 128)
 
 # Function to get configs for a given d_head
 get_configs_for_dhead() {
@@ -40,20 +67,20 @@ get_configs_for_dhead() {
     fi
 }
 MAPPING_MODES=(
-    "0:true"   # aiter_fa with remap
-    "0:false"  # aiter_fa without remap
+#    "0:true"   # aiter_fa with remap
+#    "0:false"  # aiter_fa without remap
     "1:false"  # head_first without remap
-    "2:false"  # triton_fa without remap
+#    "2:false"  # triton_fa without remap
 )
 
 # Define batch sizes to iterate over
-BATCH_SIZES=(4 8)
+BATCH_SIZES=(1 2)
 
 # Set parallel jobs (adjust as needed)
 PARALLEL_JOBS=${PARALLEL_JOBS:-4}
 
 # Set output directory
-OUTPUT_DIR=${OUTPUT_DIR:-"/workspace/gqa_benchmark_results"}
+OUTPUT_DIR=${OUTPUT_DIR:-"/workspace/hf_tmp_benchmark_results"}
 mkdir -p "$OUTPUT_DIR"
 
 run_benchmark() {
