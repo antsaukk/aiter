@@ -426,7 +426,6 @@ def _attn_fwd(
     NUM_XCD: tl.constexpr,
     USE_INT64_STRIDES: tl.constexpr,
     MAPPING_MODE: tl.constexpr,  # 0: aiter, 1: head_first, 2: triton_fa
-    USE_REMAP: tl.constexpr,  # True/False for aiter remap functionality
 ):
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
     # calculate offsets
@@ -439,10 +438,7 @@ def _attn_fwd(
     if MAPPING_MODE == 0:  # aiter case
         off_q_head = wid % NUM_Q_HEADS
         start_m = (wid // NUM_Q_HEADS) % NUM_BLOCKS
-
-        # Conditional remap - only compiled when USE_REMAP is True
-        if USE_REMAP:
-            off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
+        off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
 
     elif MAPPING_MODE == 1:  # head_first case
         chunk_size = (
@@ -949,7 +945,6 @@ def _flash_attn_forward(
     descale_v: Optional[torch.Tensor] = None,
     config: Optional[dict[str, any]] = None,
     mapping_mode: int = 0,
-    use_remap: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     if bias is not None:
@@ -1115,7 +1110,6 @@ def _flash_attn_forward(
         NUM_XCD=8,
         USE_INT64_STRIDES=_USE_INT64_STRIDES,
         MAPPING_MODE=mapping_mode,
-        USE_REMAP=use_remap,
         **config,
     )
 
@@ -1141,7 +1135,6 @@ class _FlashAttnFunc(torch.autograd.Function):
         is_grad_enabled,
         config=None,
         mapping_mode=0,
-        use_remap=True,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -1169,7 +1162,6 @@ class _FlashAttnFunc(torch.autograd.Function):
                 max_seqlen_k=k.shape[1],
                 config=config,
                 mapping_mode=mapping_mode,  # Pass them through
-                use_remap=use_remap,
             )
         )
 
@@ -1292,7 +1284,6 @@ def flash_attn_func(
     return_attn_probs=False,
     config: Optional[dict[str, any]] = None,
     mapping_mode=0,  # Add these parameters
-    use_remap=True,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
@@ -1362,7 +1353,6 @@ def flash_attn_func(
         torch.is_grad_enabled(),
         config,
         mapping_mode,
-        use_remap,
     )
 
 
