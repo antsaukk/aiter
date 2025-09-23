@@ -160,6 +160,94 @@ def test_mla(
         seq_lens_kv.fill_(ctx_lens)
         seq_lens_qo.fill_(ctx_lens)
 
+    hack = torch.tensor(
+        [
+            3819,
+            9978,
+            784,
+            530,
+            8062,
+            1390,
+            287,
+            1008,
+            5090,
+            5304,
+            7396,
+            2288,
+            2104,
+            4063,
+            3644,
+            5091,
+            6470,
+            4732,
+            7237,
+            430,
+            2777,
+            956,
+            1357,
+            5478,
+            1292,
+            521,
+            6802,
+            1347,
+            2388,
+            5062,
+            443,
+            8560,
+            5049,
+            7235,
+            927,
+            9580,
+            623,
+            4913,
+            2511,
+            8120,
+            1638,
+            4859,
+            600,
+            7289,
+            8278,
+            6693,
+            136,
+            1021,
+            1465,
+            5859,
+            1278,
+            7123,
+            7839,
+            2459,
+            1090,
+            6333,
+            812,
+            9358,
+            6345,
+            8616,
+            2313,
+            6115,
+            6059,
+            4963,
+            12343,
+            213,
+            143,
+            12312,
+            12345,
+            3215,
+            4444,
+            5325,
+            2132,
+            123,
+            456,
+            2135,
+            135,
+            2564,
+            5465,
+            4362,
+        ],
+        device="cuda",
+    )
+    if batch_size <= hack.size(0):
+        seq_lens_kv = hack[:batch_size]
+
     kv_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_kv, dim=0)
     kv_indices = torch.randint(0, num_page, (kv_indptr[-1].item(),), dtype=torch.int)
     qo_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_qo, dim=0)
@@ -241,7 +329,8 @@ def test_mla(
         "fast_mode": 1,
     }
 
-    meta = aiter.get_mla_metadata_v1(
+    meta, meta_us = run_perftest(
+        aiter.get_mla_metadata_v1,
         qo_indptr,
         kv_indptr,
         nhead // nhead_kv,
@@ -255,6 +344,46 @@ def test_mla(
         reduce_partial_map,
         split_params=split_params,
     )
+
+    # meta = aiter.get_mla_metadata_v1(
+    #     qo_indptr,
+    #     kv_indptr,
+    #     nhead // nhead_kv,
+    #     nhead_kv,
+    #     True,
+    #     work_meta_data,
+    #     work_info_set,
+    #     work_indptr,
+    #     reduce_indptr,
+    #     reduce_final_map,
+    #     reduce_partial_map,
+    #     split_params=split_params,
+    # )
+
+    valid_work_cnt = 0
+    for i in range(batch_size * 80):
+        bid = work_info_set[i][0].item()
+        if bid >= batch_size or bid < 0:
+            break
+        valid_work_cnt = i + 1
+    valid_reduce_partial_cnt = reduce_indptr[batch_size].item()
+
+    print(f"seq_lens_kv({seq_lens_kv.shape}):")
+    print(seq_lens_kv)
+    print(f"kv_indptr({kv_indptr.shape}):")
+    print(kv_indptr)
+    print(f"work_indptr({work_indptr.shape}):")
+    print(work_indptr)
+    print(f"work_info_set({work_info_set.shape}.{valid_work_cnt}):")
+    print(work_info_set[:valid_work_cnt])
+    print(f"reduce_indptr({batch_size + 1}):")
+    print(reduce_indptr[: batch_size + 1])
+    print(f"reduce_final_map({batch_size}):")
+    print(reduce_final_map[:batch_size])
+    print(f"reduce_partial_map({reduce_partial_map.shape}.{valid_reduce_partial_cnt}):")
+    print(reduce_partial_map[:valid_reduce_partial_cnt])
+
+    # exit()
 
     def test_absorb_decode():
         kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
@@ -476,7 +605,8 @@ parser.add_argument(
     "--ctxLen",
     type=int,
     nargs="*",
-    default=[28, 512, 1023, 4888, 12800],  #
+    # default=[28, 512, 1023, 4888, 12800],  #
+    default=[222],
     help="""Context length.
     e.g.: -c 21""",
 )
@@ -485,7 +615,8 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[i for i in range(1, 80)],  # [41],
+    # default=[i for i in range(1, 80)],  # [41],
+    default=[64],
     help="""Batch size.
     e.g.: -b 16""",
 )
