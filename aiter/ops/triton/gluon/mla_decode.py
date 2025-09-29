@@ -1295,12 +1295,13 @@ def _fwd_grouped_kernel_stage1_n16(
         p = tl.math.exp2((qk - n_e_max[:, None]) * log2e)
         acc = acc * re_scale[:, None]
 
-        smem_p.store(p.to(cur_v.dtype))
+        s = gl.convert_layout(
+            p.to(cur_v.dtype), layout=dot_p_layout, assert_trivial=True
+        )
         e_sum = e_sum * re_scale + gl.sum(p, 1)
-        cur_p = smem_p.load(layout=dot_p_layout)
         e_max = n_e_max
 
-        acc = gl.amd.cdna3.mfma(cur_p, cur_v, acc)
+        acc = gl.amd.cdna3.mfma(s, cur_v, acc)
 
     smem_v._keep_alive()
     smem_k._keep_alive()
