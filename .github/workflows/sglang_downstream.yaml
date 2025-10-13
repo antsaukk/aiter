@@ -17,7 +17,7 @@ jobs:
     runs-on: aiter-mi355-1gpu
     env:
       SGL_BRANCH: v0.5.3
-      GPU_ARCH: gfx942
+      GPU_ARCH: gfx950
 
     steps:
       - name: Checkout aiter repo
