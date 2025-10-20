@@ -1,4 +1,14 @@
+#!/usr/bin/env python
+
+
+# Imports
+# ------------------------------------------------------------------------------
+
 from pathlib import Path
+
+
+# Structure of Triton source files.
+# ------------------------------------------------------------------------------
 
 
 def check_dir(p: Path) -> Path:
@@ -45,6 +55,10 @@ def list_triton_source_files() -> tuple[set[Path], ...]:
     bench_files = list_triton_bench_files()
     all_files = op_files | config_files | test_files | bench_files
     return all_files, config_files, test_files, bench_files
+
+
+# Script entry point.
+# ------------------------------------------------------------------------------
 
 
 def main() -> None:
