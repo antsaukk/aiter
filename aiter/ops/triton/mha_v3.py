@@ -841,15 +841,15 @@ def flash_attn_fp8_func(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    dropout_p: float = 0.0,
     softmax_scale: Optional[float] = None,
     causal: bool = False,
+    qv: Optional[torch.Tensor] = None,
     window_size: Tuple[int, int] = (-1, -1),
     attention_chunk: int = 0,
     softcap: float = 0.0,
+    num_splits: int = 1,
+    pack_gqa: Optional[bool] = None,
     deterministic: bool = False,
-    return_lse: bool = False,
-    return_attn_probs: bool = False,
     sm_margin: int = 0,
 ):
     """
@@ -867,38 +867,56 @@ def flash_attn_fp8_func(
         q: Query tensor [batch, seqlen, num_q_heads, head_dim] (BF16/FP32)
         k: Key tensor [batch, seqlen, num_kv_heads, head_dim] (BF16/FP32)
         v: Value tensor [batch, seqlen, num_kv_heads, head_dim] (BF16/FP32)
-        dropout_p: Dropout probability (not yet supported, must be 0.0)
         softmax_scale: Scaling factor for softmax (default: 1/sqrt(head_dim))
         causal: Whether to apply causal masking
+        qv: Extra query-value tensor (not yet supported in FP8 mode)
         window_size: Sliding window attention size (left, right)
-        attention_chunk: Attention chunk size (0 or 1 only)
-        softcap: Softcap value (not yet supported, must be 0.0)
+        attention_chunk: Chunking parameter (0 or 1 only)
+        softcap: Softcapping value (not yet supported in FP8 mode)
+        num_splits: Number of splits for parallel processing (not yet supported in FP8 mode)
+        pack_gqa: GQA packing flag (not yet supported in FP8 mode)
         deterministic: Whether to use deterministic backward
-        return_lse: Whether to return log-sum-exp of attention scores
-        return_attn_probs: Whether to return attention probabilities (not yet supported)
-        sm_margin: SM margin (not yet supported, must be 0)
+        sm_margin: SM margin parameter (not yet supported in FP8 mode)
 
     Returns:
         out: Output tensor [batch, seqlen, num_q_heads, head_dim] (FP32)
-        softmax_lse [optional, if return_lse=True]: Log-sum-exp tensor
-        S_dmask [optional, if return_attn_probs=True]: Attention probability tensor (not yet supported)
 
     Note:
         - Supports GQA/MQA (num_q_heads != num_kv_heads)
         - Automatically handles grouped quantization for GQA/MQA queries
         - Gradients are computed in FP32 and converted to input dtype
-        - dropout_p and return_attn_probs are not yet supported in FP8 mode
+        - qv, softcap, num_splits, pack_gqa, and sm_margin are not yet supported in FP8 mode
     """
-    if dropout_p > 0.0:
+    # Check that inputs are high precision (not already FP8)
+    assert q.dtype in [torch.float16, torch.bfloat16, torch.float32], (
+        f"flash_attn_fp8_func expects high-precision inputs (fp16/bf16/fp32), got q.dtype={q.dtype}. "
+        f"If you already have FP8 tensors, use flash_attn_func() with q_descale/k_descale/v_descale parameters instead."
+    )
+    assert k.dtype in [torch.float16, torch.bfloat16, torch.float32], (
+        f"flash_attn_fp8_func expects high-precision inputs (fp16/bf16/fp32), got k.dtype={k.dtype}. "
+        f"If you already have FP8 tensors, use flash_attn_func() with q_descale/k_descale/v_descale parameters instead."
+    )
+    assert v.dtype in [torch.float16, torch.bfloat16, torch.float32], (
+        f"flash_attn_fp8_func expects high-precision inputs (fp16/bf16/fp32), got v.dtype={v.dtype}. "
+        f"If you already have FP8 tensors, use flash_attn_func() with q_descale/k_descale/v_descale parameters instead."
+    )
+
+    if qv is not None:
+        raise NotImplementedError("qv not supported in FP8 high-precision API")
+    if softcap != 0.0:
+        raise NotImplementedError("softcap not supported in FP8 high-precision API")
+    if num_splits != 1:
         raise NotImplementedError(
-            "dropout_p > 0 not supported in FP8 high-precision API"
+            "num_splits != 1 not supported in FP8 high-precision API"
         )
-    if return_attn_probs:
+    if pack_gqa is not None:
+        raise NotImplementedError("pack_gqa not supported in FP8 high-precision API")
+    if sm_margin != 0:
         raise NotImplementedError(
-            "return_attn_probs not supported in FP8 high-precision API"
+            "sm_margin != 0 not supported in FP8 high-precision API"
         )
 
-    out = _FlashAttnFP8Wrapper.apply(
+    return _FlashAttnFP8Wrapper.apply(
         q,
         k,
         v,
@@ -910,15 +928,6 @@ def flash_attn_fp8_func(
         deterministic,
         sm_margin,
     )
-
-    if return_lse:
-        # Return a dummy LSE tensor for now - this would need to be properly implemented
-        # by modifying the wrapper to also return softmax_lse
-        raise NotImplementedError(
-            "return_lse not yet fully supported in FP8 high-precision API"
-        )
-
-    return out
 
 
 class _FlashAttnVarlenFP8Wrapper(torch.autograd.Function):
@@ -1130,15 +1139,12 @@ def flash_attn_varlen_fp8_func(
     cu_seqlens_k: torch.Tensor,
     max_seqlen_q: int,
     max_seqlen_k: int,
-    dropout_p: float = 0.0,
     softmax_scale: Optional[float] = None,
     causal: bool = False,
     window_size: Tuple[int, int] = (-1, -1),
     attention_chunk: int = 0,
     softcap: float = 0.0,
     deterministic: bool = False,
-    return_lse: bool = False,
-    return_attn_probs: bool = False,
     sm_margin: int = 0,
 ):
     """
@@ -1160,38 +1166,51 @@ def flash_attn_varlen_fp8_func(
         cu_seqlens_k: Cumulative sequence lengths for keys [batch_size + 1]
         max_seqlen_q: Maximum query sequence length
         max_seqlen_k: Maximum key sequence length
-        dropout_p: Dropout probability (not yet supported, must be 0.0)
         softmax_scale: Scaling factor for softmax (default: 1/sqrt(head_dim))
         causal: Whether to apply causal masking
         window_size: Sliding window attention size (left, right)
-        attention_chunk: Attention chunk size (must be 0)
-        softcap: Softcap value (not yet supported, must be 0.0)
+        attention_chunk: Chunking parameter (must be 0 in varlen FP8 mode)
+        softcap: Softcapping value (not yet supported in FP8 mode)
         deterministic: Whether to use deterministic backward
-        return_lse: Whether to return log-sum-exp of attention scores
-        return_attn_probs: Whether to return attention probabilities (not yet supported)
-        sm_margin: SM margin (not yet supported, must be 0)
+        sm_margin: SM margin parameter (not yet supported in FP8 mode)
 
     Returns:
         out: Output tensor [total_q, num_q_heads, head_dim] (FP32)
-        softmax_lse [optional, if return_lse=True]: Log-sum-exp tensor
-        S_dmask [optional, if return_attn_probs=True]: Attention probability tensor (not yet supported)
 
     Note:
         - Supports GQA/MQA (num_q_heads != num_kv_heads)
         - Automatically handles grouped quantization for GQA/MQA queries
         - Gradients are computed in FP32 and converted to input dtype
-        - dropout_p and return_attn_probs are not yet supported in FP8 mode
+        - attention_chunk, softcap, and sm_margin are not yet supported in varlen FP8 mode
     """
-    if dropout_p > 0.0:
+    # Check that inputs are high precision (not already FP8)
+    assert q.dtype in [torch.float16, torch.bfloat16, torch.float32], (
+        f"flash_attn_varlen_fp8_func expects high-precision inputs (fp16/bf16/fp32), got q.dtype={q.dtype}. "
+        f"If you already have FP8 tensors, use flash_attn_varlen_func() with q_descale/k_descale/v_descale parameters instead."
+    )
+    assert k.dtype in [torch.float16, torch.bfloat16, torch.float32], (
+        f"flash_attn_varlen_fp8_func expects high-precision inputs (fp16/bf16/fp32), got k.dtype={k.dtype}. "
+        f"If you already have FP8 tensors, use flash_attn_varlen_func() with q_descale/k_descale/v_descale parameters instead."
+    )
+    assert v.dtype in [torch.float16, torch.bfloat16, torch.float32], (
+        f"flash_attn_varlen_fp8_func expects high-precision inputs (fp16/bf16/fp32), got v.dtype={v.dtype}. "
+        f"If you already have FP8 tensors, use flash_attn_varlen_func() with q_descale/k_descale/v_descale parameters instead."
+    )
+
+    if attention_chunk != 0:
         raise NotImplementedError(
-            "dropout_p > 0 not supported in FP8 varlen high-precision API"
+            "attention_chunk != 0 not supported in FP8 varlen high-precision API"
         )
-    if return_attn_probs:
+    if softcap != 0.0:
         raise NotImplementedError(
-            "return_attn_probs not supported in FP8 varlen high-precision API"
+            "softcap not supported in FP8 varlen high-precision API"
+        )
+    if sm_margin != 0:
+        raise NotImplementedError(
+            "sm_margin != 0 not supported in FP8 varlen high-precision API"
         )
 
-    out = _FlashAttnVarlenFP8Wrapper.apply(
+    return _FlashAttnVarlenFP8Wrapper.apply(
         q,
         k,
         v,
@@ -1207,12 +1226,3 @@ def flash_attn_varlen_fp8_func(
         deterministic,
         sm_margin,
     )
-
-    if return_lse:
-        # Return a dummy LSE tensor for now - this would need to be properly implemented
-        # by modifying the wrapper to also return softmax_lse
-        raise NotImplementedError(
-            "return_lse not yet fully supported in FP8 varlen high-precision API"
-        )
-
-    return out

@@ -442,11 +442,8 @@ def run_benchmark(custom, args):
                         cu_seqlens_k,
                         max_seqlen_q,
                         max_seqlen_k,
-                        dropout_p=dropout,
                         softmax_scale=sm_scale,
                         causal=causal,
-                        return_lse=return_lse,
-                        return_attn_probs=return_attn_probs,
                     )
 
             else:
@@ -475,11 +472,8 @@ def run_benchmark(custom, args):
                         q_input,
                         k_input,
                         v_input,
-                        dropout_p=dropout,
                         softmax_scale=sm_scale,
                         causal=causal,
-                        return_lse=return_lse,
-                        return_attn_probs=return_attn_probs,
                     )
 
             else:
