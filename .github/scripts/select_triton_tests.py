@@ -27,50 +27,47 @@ def check_dir(p: Path) -> Path:
     return p
 
 
-ROOT_DIR: Path = check_dir(Path(__file__).parent.parent.parent)
-TRITON_OP_DIR: Path = check_dir(ROOT_DIR / "aiter" / "ops" / "triton")
-TRITON_CONFIG_DIR: Path = check_dir(TRITON_OP_DIR / "configs")
-TEST_DIR: Path = check_dir(ROOT_DIR / "op_tests")
-TRITON_TEST_DIR: Path = check_dir(TEST_DIR / "triton_tests")
-TRITON_BENCH_DIR: Path = check_dir(TEST_DIR / "op_benchmarks" / "triton")
+def list_files(root_dir: Path, dir: Path, suffix: str = "") -> set[Path]:
+    return {p.relative_to(root_dir) for p in dir.glob(f"**/*{suffix}") if p.is_file()}
 
 
-def list_files(dir: Path, suffix: str = "") -> set[Path]:
-    return {p.relative_to(ROOT_DIR) for p in dir.glob(f"**/*{suffix}") if p.is_file()}
-
-
-def list_triton_op_files() -> set[Path]:
-    files = list_files(TRITON_OP_DIR, suffix=".py")
+def list_triton_op_files(root_dir: Path, op_dir: Path) -> set[Path]:
+    files = list_files(root_dir, op_dir, suffix=".py")
     logging.debug("Found %d Triton operator source files.", len(files))
     return files
 
 
-def list_triton_config_files() -> set[Path]:
-    files = list_files(TRITON_CONFIG_DIR, suffix=".json")
+def list_triton_config_files(root_dir: Path, config_dir: Path) -> set[Path]:
+    files = list_files(root_dir, config_dir, suffix=".json")
     logging.debug("Found %d Triton operator config files.", len(files))
     return files
 
 
-def list_triton_test_files() -> set[Path]:
-    files = list_files(TRITON_TEST_DIR, suffix=".py")
+def list_triton_test_files(root_dir: Path, test_dir: Path) -> set[Path]:
+    files = list_files(root_dir, test_dir, suffix=".py")
     logging.debug("Found %d Triton test source files.", len(files))
     return files
 
 
-def list_triton_bench_files() -> set[Path]:
+def list_triton_bench_files(root_dir: Path, bench_dir: Path) -> set[Path]:
     # TODO: How to deal with these files?
     #       op_tests/op_benchmarks/triton/utils/model_configs.json
     #       op_tests/op_benchmarks/triton/bench_schema.yaml
-    files = list_files(TRITON_BENCH_DIR, suffix=".py")
+    files = list_files(root_dir, bench_dir, suffix=".py")
     logging.debug("Found %d Triton benchmark source files.", len(files))
     return files
 
 
 def list_triton_source_files() -> tuple[set[Path], ...]:
-    op_files = list_triton_op_files()
-    config_files = list_triton_config_files()
-    test_files = list_triton_test_files()
-    bench_files = list_triton_bench_files()
+    root_dir = check_dir(Path(__file__).parent.parent.parent)
+    op_dir = check_dir(root_dir / "aiter" / "ops" / "triton")
+    config_dir = check_dir(op_dir / "configs")
+    test_dir = check_dir(root_dir / "op_tests" / "triton_tests")
+    bench_dir = check_dir(root_dir / "op_tests" / "op_benchmarks" / "triton")
+    op_files = list_triton_op_files(root_dir, op_dir)
+    config_files = list_triton_config_files(root_dir, config_dir)
+    test_files = list_triton_test_files(root_dir, test_dir)
+    bench_files = list_triton_bench_files(root_dir, bench_dir)
     all_files = op_files | config_files | test_files | bench_files
     return all_files, config_files, test_files, bench_files
 
