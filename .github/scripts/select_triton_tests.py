@@ -5,6 +5,7 @@
 # ------------------------------------------------------------------------------
 
 # Python standard library.
+import argparse
 import logging
 from pathlib import Path
 import shlex
@@ -131,16 +132,38 @@ def git_filename_diff(source_branch: str, target_branch: str) -> set[Path]:
     return files
 
 
+# Command line interface parsing.
+# ------------------------------------------------------------------------------
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="select which Triton tests to run based on git diff"
+    )
+    parser.add_argument("-s", "--source", required=True, help="source branch")
+    parser.add_argument(
+        "-t", "--target", default="main", help="target branch, defaults to main"
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="enable verbose output"
+    )
+    return parser.parse_args()
+
+
 # Script entry point.
 # ------------------------------------------------------------------------------
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.DEBUG)
+    args = parse_args()
 
-    # TODO: Add command line parser.
-    source_branch: str | None = None
-    target_branch: str = "main"
+    logging.basicConfig(
+        format="%(asctime)s|%(message)s",
+        level=logging.DEBUG if args.verbose else logging.INFO,
+    )
+
+    source_branch: str | None = args.source
+    target_branch: str = args.target
 
     if source_branch is None:
         source_branch = git_current_branch()
