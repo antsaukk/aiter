@@ -6,6 +6,8 @@
 
 # Python standard library.
 import argparse
+import ast
+from functools import lru_cache
 import logging
 from pathlib import Path
 import shlex
@@ -25,6 +27,10 @@ def check_dir(p: Path) -> Path:
         logging.critical("Required directory [%s] isn't a directory.", p)
         sys.exit(1)
     return p
+
+
+def root_dir() -> Path:
+    return check_dir(Path(__file__).parent.parent.parent)
 
 
 def list_files(root_dir: Path, dir: Path, suffix: str = "") -> set[Path]:
@@ -59,15 +65,15 @@ def list_triton_bench_files(root_dir: Path, bench_dir: Path) -> set[Path]:
 
 
 def list_triton_source_files() -> tuple[set[Path], ...]:
-    root_dir = check_dir(Path(__file__).parent.parent.parent)
-    op_dir = check_dir(root_dir / "aiter" / "ops" / "triton")
+    root_dir_ = root_dir()
+    op_dir = check_dir(root_dir_ / "aiter" / "ops" / "triton")
     config_dir = check_dir(op_dir / "configs")
-    test_dir = check_dir(root_dir / "op_tests" / "triton_tests")
-    bench_dir = check_dir(root_dir / "op_tests" / "op_benchmarks" / "triton")
-    op_files = list_triton_op_files(root_dir, op_dir)
-    config_files = list_triton_config_files(root_dir, config_dir)
-    test_files = list_triton_test_files(root_dir, test_dir)
-    bench_files = list_triton_bench_files(root_dir, bench_dir)
+    test_dir = check_dir(root_dir_ / "op_tests" / "triton_tests")
+    bench_dir = check_dir(root_dir_ / "op_tests" / "op_benchmarks" / "triton")
+    op_files = list_triton_op_files(root_dir_, op_dir)
+    config_files = list_triton_config_files(root_dir_, config_dir)
+    test_files = list_triton_test_files(root_dir_, test_dir)
+    bench_files = list_triton_bench_files(root_dir_, bench_dir)
     all_files = op_files | config_files | test_files | bench_files
     return all_files, config_files, test_files, bench_files
 
@@ -127,6 +133,73 @@ def git_filename_diff(source_branch: str, target_branch: str) -> set[Path]:
         target_branch,
     )
     return files
+
+
+# Source file parsing.
+# ------------------------------------------------------------------------------
+
+
+def module_to_path(module: str, root_dir: Path) -> Path:
+    return root_dir / (module.replace(".", "/") + ".py")
+
+
+# TODO: Keep only project imports.
+class Visitor(ast.NodeVisitor):
+    imports: set[str]
+
+    def __init__(self) -> None:
+        self.imports = set()
+
+    def visit_Import(self, node: ast.Import):
+        for alias in node.names:
+            self.imports.add(alias.name)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        if node.module:
+            self.imports.add(node.module)
+        self.generic_visit(node)
+
+
+@lru_cache(maxsize=256)
+def parse_source_file(source_file: Path) -> set[str]:
+    try:
+        source = source_file.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(source_file))
+    except Exception:
+        logging.exception("Skipping source file [%s].", source_file)
+        return set()
+
+    visitor = Visitor()
+    visitor.visit(tree)
+
+    imports = visitor.imports
+    logging.debug("Imports of [%s]:", source_file)
+    for i in imports:
+        logging.debug("* %s", i)
+
+    return imports
+
+
+def parse_source_file_recursively(source_file: Path):
+    root_dir_ = root_dir()
+
+    visited = set()
+    stack = [root_dir_ / source_file]
+
+    while stack:
+        current = stack.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+
+        imports = parse_source_file(current)
+        for i in imports:
+            sub_path = module_to_path(i, root_dir_)
+            if sub_path.exists():
+                stack.append(sub_path)
+
+    return visited
 
 
 # Command line interface parsing.
@@ -195,6 +268,11 @@ def main() -> None:
     )
     for p in sorted(diff_inter_triton):
         logging.info("* %s", p)
+
+    # import pdb; pdb.set_trace()
+    test_file = next(iter(test_files))
+    logging.info(test_file)
+    parse_source_file_recursively(test_file)
 
 
 if __name__ == "__main__":
