@@ -7,7 +7,7 @@
 # Python standard library.
 import argparse
 import ast
-from functools import lru_cache
+from functools import cache, lru_cache
 import logging
 from pathlib import Path
 import shlex
@@ -29,6 +29,7 @@ def check_dir(p: Path) -> Path:
     return p
 
 
+@cache
 def root_dir() -> Path:
     return check_dir(Path(__file__).parent.parent.parent)
 
@@ -110,10 +111,11 @@ def git_check_branch(branch: str) -> None:
 
 def git_filename_diff(source_branch: str, target_branch: str) -> set[Path]:
     files = {
-        Path(p)
-        for p in git(f"diff --name-only {target_branch} {source_branch}")
+        p
+        for diff_p in git(f"diff --name-only {target_branch} {source_branch}")
         .stdout.rstrip()
         .splitlines()
+        if (p := Path(diff_p)).exists() and p.is_file()
     }
     logging.debug(
         "There %s %d file%s in the diff from [%s] to [%s].",
@@ -123,16 +125,26 @@ def git_filename_diff(source_branch: str, target_branch: str) -> set[Path]:
         source_branch,
         target_branch,
     )
-    files = {p for p in files if p.exists() and p.is_file()}
-    logging.debug(
-        "There %s %d file%s in the diff from [%s] to [%s] after filtering existing files.",
-        "is" if len(files) == 1 else "are",
-        len(files),
-        "" if len(files) == 1 else "s",
-        source_branch,
-        target_branch,
-    )
     return files
+
+
+def get_filename_diff(source_branch: str | None, target_branch: str) -> set[Path]:
+    if source_branch is None:
+        source_branch = git_current_branch()
+        logging.info(
+            "Source branch wasn't provided, using current branch [%s] as source branch.",
+            source_branch,
+        )
+    else:
+        git_check_branch(source_branch)
+
+    git_check_branch(target_branch)
+
+    if target_branch == source_branch:
+        logging.error("Source and target branches must be different.")
+        sys.exit(1)
+
+    return git_filename_diff(source_branch, target_branch)
 
 
 # Source file parsing.
@@ -232,25 +244,7 @@ def main() -> None:
         level=logging.DEBUG if args.verbose else logging.INFO,
     )
 
-    source_branch: str | None = args.source
-    target_branch: str = args.target
-
-    if source_branch is None:
-        source_branch = git_current_branch()
-        logging.info(
-            "Source branch wasn't provided, using current branch [%s] as source branch.",
-            source_branch,
-        )
-    else:
-        git_check_branch(source_branch)
-
-    git_check_branch(target_branch)
-
-    if target_branch == source_branch:
-        logging.error("Source and target branches must be different.")
-        sys.exit(1)
-
-    diff_files = git_filename_diff(source_branch, target_branch)
+    diff_files = get_filename_diff(args.source, args.target)
     all_files, config_files, test_files, bench_files = list_triton_source_files()
 
     diff_inter_triton = diff_files & all_files
