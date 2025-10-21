@@ -7,13 +7,13 @@
 # Python standard library.
 import argparse
 import ast
-from functools import cache, lru_cache
 import logging
-from pathlib import Path
+import os
 import shlex
 import subprocess
 import sys
-
+from functools import cache, lru_cache
+from pathlib import Path
 
 # Structure of Triton source files.
 # ------------------------------------------------------------------------------
@@ -58,8 +58,8 @@ def list_triton_test_files(root_dir: Path, test_dir: Path) -> set[Path]:
 
 def list_triton_bench_files(root_dir: Path, bench_dir: Path) -> set[Path]:
     # TODO: How to deal with these files?
-    #       op_tests/op_benchmarks/triton/utils/model_configs.json
-    #       op_tests/op_benchmarks/triton/bench_schema.yaml
+    #       `op_tests/op_benchmarks/triton/utils/model_configs.json`
+    #       `op_tests/op_benchmarks/triton/bench_schema.yaml`
     files = list_files(root_dir, bench_dir, suffix=".py")
     logging.debug("Found %d Triton benchmark source files.", len(files))
     return files
@@ -151,67 +151,116 @@ def get_filename_diff(source_branch: str | None, target_branch: str) -> set[Path
 # ------------------------------------------------------------------------------
 
 
-def module_to_path(module: str, root_dir: Path) -> Path:
-    return root_dir / (module.replace(".", "/") + ".py")
-
-
-# TODO: Keep only project imports.
 class Visitor(ast.NodeVisitor):
-    imports: set[str]
+    imports_to_ignore: frozenset[str] = frozenset(
+        [
+            "os.path",
+            "numpy",
+            "pandas",
+            "matplotlib.pyplot",
+            "torch",
+            "einops",
+            "triton",
+            "pytest",
+            "prettytable",
+        ]
+    )
+    import_prefixes_to_ignore: tuple[str, ...] = (
+        "torch.",
+        "triton.",
+        "jax.",
+    )
 
-    def __init__(self) -> None:
-        self.imports = set()
+    @classmethod
+    def is_import_of_interest(cls, import_: str) -> bool:
+        return (
+            import_ not in sys.stdlib_module_names
+            and import_ not in cls.imports_to_ignore
+            and not any(
+                import_.startswith(prefix) for prefix in cls.import_prefixes_to_ignore
+            )
+        )
 
-    def visit_Import(self, node: ast.Import):
+    def __init__(self, root_dir: Path, source_file: Path) -> None:
+        self.root_dir: Path = root_dir
+        # Remove extension from source file, and split directories into module parts.
+        self.source_file: Path = source_file
+        self.source_module_parts: tuple[str, ...] = self.source_file.with_suffix(
+            ""
+        ).parts
+        self.dependencies: set[Path] = set()
+
+    def add_dependency(self, import_: str) -> None:
+        if import_ and self.__class__.is_import_of_interest(import_):
+            p = self.root_dir / (import_.replace(".", os.sep) + ".py")
+            if p.exists() and p.is_file():
+                # Add dependency as Python module / source file.
+                self.dependencies.add(p.relative_to(self.root_dir))
+                return
+            p = p.with_suffix("")
+            if p.exists() and p.is_dir():
+                # Add dependency as Python package / directory.
+                self.dependencies.add(p.relative_to(self.root_dir))
+                return
+            logging.warning(
+                "Unable to find [%s] dependency of [%s] on filesystem.",
+                import_,
+                self.source_file,
+            )
+
+    def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            self.imports.add(alias.name)
+            self.add_dependency(alias.name)
         self.generic_visit(node)
 
-    def visit_ImportFrom(self, node: ast.ImportFrom):
-        if node.module:
-            self.imports.add(node.module)
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        module_name = node.module if node.module else ""
+        if node.level > 0:
+            # Resolve full import from relative import.
+            full_module_name = ".".join(self.source_module_parts[: -node.level])
+            if module_name:
+                full_module_name += "." + module_name
+        else:
+            full_module_name = module_name
+        self.add_dependency(full_module_name)
         self.generic_visit(node)
 
 
 @lru_cache(maxsize=256)
-def parse_source_file(source_file: Path) -> set[str]:
+def parse_source_file(root_dir: Path, source_file: Path) -> list[Path]:
     try:
-        source = source_file.read_text(encoding="utf-8")
+        source = (root_dir / source_file).read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(source_file))
     except Exception:
         logging.exception("Skipping source file [%s].", source_file)
-        return set()
+        return []
 
-    visitor = Visitor()
+    visitor = Visitor(root_dir, source_file)
     visitor.visit(tree)
 
-    imports = visitor.imports
-    logging.debug("Imports of [%s]:", source_file)
-    for i in imports:
-        logging.debug("* %s", i)
+    dependecies = sorted(visitor.dependencies)
+    if not dependecies:
+        logging.debug("No dependecies of interest in [%s].", source_file)
+    else:
+        logging.debug("Dependecies of interest in [%s]:", source_file)
+        for d in dependecies:
+            logging.debug("* %s", d)
 
-    return imports
+    return dependecies
 
 
-def parse_source_file_recursively(source_file: Path):
-    root_dir_ = root_dir()
-
+# TODO: How to deal with package imports?
+# TODO: How to deal with `__init__.py` files?
+def parse_source_file_recursively(root_dir: Path, source_file: Path) -> None:
     visited = set()
-    stack = [root_dir_ / source_file]
+    stack = [source_file]
 
     while stack:
         current = stack.pop()
         if current in visited:
             continue
         visited.add(current)
-
-        imports = parse_source_file(current)
-        for i in imports:
-            sub_path = module_to_path(i, root_dir_)
-            if sub_path.exists():
-                stack.append(sub_path)
-
-    return visited
+        stack.extend(p for p in parse_source_file(root_dir, current) if p.is_file())
 
 
 # Command line interface parsing.
@@ -263,10 +312,16 @@ def main() -> None:
     for p in sorted(diff_inter_triton):
         logging.info("* %s", p)
 
-    # import pdb; pdb.set_trace()
-    test_file = next(iter(test_files))
-    logging.info(test_file)
-    parse_source_file_recursively(test_file)
+    # TODO: Unable to find [test_rope] dependency of [op_tests/triton_tests/test_fused_kv_cache.py] on filesystem.
+    #       Import hack: `sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))`.
+    # TODO: Unable to find [test_rope] dependency of [op_tests/triton_tests/test_rope.py] on filesystem.
+    #       Import hack: `sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))`
+    for test_file in sorted(test_files):
+        parse_source_file_recursively(root_dir(), test_file)
+    # TODO: Unable to find [utils.benchmark_utils] dependency of [op_tests/op_benchmarks/triton/bench_la_paged_decode.py] on filesystem.
+    #       I think it's a bug on the script.
+    for bench_file in sorted(bench_files):
+        parse_source_file_recursively(root_dir(), bench_file)
 
 
 if __name__ == "__main__":
