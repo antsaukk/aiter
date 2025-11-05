@@ -11,6 +11,13 @@
 #include <torch/all.h>
 #include <tuple>
 
+#include <sstream>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+
+static std::mutex hlog_mutex;
+
 struct __attribute__((packed)) KernelArgs
 {
     void* ptr_O;
@@ -276,6 +283,7 @@ FMoeKernel* get_heuristic_kernel(int inter_dim, int sub_X_cnt, CFG* cfgs, int sm
                 tg_num = inter_dim / cfg.subGU_n *
                          sub_X_cnt; // hom many thread_groups are needed to handel inter_dim
                 uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
+
                 if(local_round < round || // fewer round is better
                    (local_round == round &&
                     (empty_cu > (local_round * num_cu - tg_num) || // fewer empty_cu is better
@@ -313,6 +321,93 @@ FMoeKernel* get_heuristic_kernel(int inter_dim, int sub_X_cnt, CFG* cfgs, int sm
         if(result.second)
             result.first->second =
                 std::make_unique<FMoeKernel>(name, co_name, cfg.subGU_n, num_persistent_tgs);
+        impl_ptr = result.first->second.get();
+    }
+    else
+        TORCH_CHECK(false, __func__, " not find kernel " + selectedKl);
+    return impl_ptr;
+}
+
+FMoeKernel* get_heuristic_kernel(int inter_dim, int sub_X_cnt, CFG* cfgs, std::ostringstream& hStream, int smf)
+{
+    FMoeKernel* impl_ptr        = nullptr;
+    uint32_t num_cu             = get_num_cu_func();
+    uint32_t empty_cu           = num_cu;
+    uint32_t tg_num             = 0;
+    uint32_t num_persistent_tgs = 0;
+    uint32_t round              = 0xffffffff;
+    std::string selectedKl      = "";
+    int vskip                   = 0;
+    static std::unordered_map<std::string, std::unique_ptr<FMoeKernel>> impl_ptr_map;
+
+    const char* vs_env_value = std::getenv("AITER_ENABLE_VSKIP");
+    if(vs_env_value != nullptr && std::string(vs_env_value) == "1")
+        vskip = 1;
+    
+    hStream << "inter dim: " << inter_dim << "\n";
+    hStream << "sub X cnt: " << sub_X_cnt << "\n";
+    hStream << "num_cu: " << num_cu << "\n\n";
+
+    for(const auto& el : *cfgs)
+    {
+        const auto& cfg = el.second;
+        if(cfg.vskip == vskip && cfg.smf == smf)
+        {
+            if((inter_dim % cfg.subGU_n) == 0)
+            {
+                tg_num = inter_dim / cfg.subGU_n *
+                         sub_X_cnt; // hom many thread_groups are needed to handel inter_dim
+                uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
+
+                hStream << "kernel name: " << el.first << "\n";
+                hStream << "tg_num: " << tg_num << "\n";
+                hStream << "local_round: " << local_round << "\n";
+                hStream << "local_round < round: " << bool(local_round < round) << "\n";
+                hStream << "empty_cu > (local_round * num_cu - tg_num): " << bool(empty_cu > (local_round * num_cu - tg_num)) << "\n\n";
+
+                if(local_round < round || // fewer round is better
+                   (local_round == round &&
+                    (empty_cu > (local_round * num_cu - tg_num) || // fewer empty_cu is better
+                     (empty_cu == (local_round * num_cu - tg_num) &&
+                      cfg.ps == 1)))) // prefer PS kernel
+                {
+                    round      = local_round;
+                    empty_cu   = local_round * num_cu - tg_num;
+                    selectedKl = el.first;
+                    if(cfg.ps == 1)
+                        num_persistent_tgs = cfg.tg_num_perCU * num_cu;
+                    else
+                        num_persistent_tgs = 0;
+                    hStream << "selected kernel name: " << selectedKl << "\n";
+                    hStream << "upd empty_cu: " << empty_cu << "\n";
+                    hStream << "upd round: " << round << "\n\n";
+                }
+            }
+        }
+    }
+    TORCH_CHECK(selectedKl != "",
+                __func__,
+                ": No suitable kernel found for inter_dim: ",
+                inter_dim,
+                ", sub_X_cnt: ",
+                sub_X_cnt,
+                ", smf: ",
+                smf,
+                ", vskip: ",
+                vskip);
+    auto it = cfgs->find(selectedKl);
+    if(it != cfgs->end())
+    {
+        const auto& cfg     = it->second;
+        const char* name    = cfg.name.c_str();
+        const char* co_name = cfg.co_name.c_str();
+        auto result         = impl_ptr_map.emplace(name, nullptr);
+        if(result.second)
+            result.first->second =
+                std::make_unique<FMoeKernel>(name, co_name, cfg.subGU_n, num_persistent_tgs);
+        hStream << "final selected name: " << name << "\n";
+        hStream << "final selected co_name: " << co_name << "\n";
+        hStream << "final selected sub_gu: " << cfg.subGU_n << "\n\n";
         impl_ptr = result.first->second.get();
     }
     else
@@ -663,6 +758,13 @@ void fmoe_g1u1_tkw1(torch::Tensor& out,                            // [token_cnt
     const int block_m   = 32; // fmoe sorting kernel and fmoe kernel only support 32 for now
     const int estimated_sub_X_cnt = (token_cnt * topk + block_m - 1) / block_m;
 
+    std::ostringstream hStream;
+
+    hStream << "ptr dtype: " << num_valid_ids.dtype() << "\n";
+    hStream << "token cnt " << token_cnt << "\n";
+    hStream << "esx = " << estimated_sub_X_cnt << "\n";
+    hStream << "topk = " << topk << "\n\n";
+
     if(fc2_smooth_scale.has_value())
     {
         TORCH_CHECK(false, __func__, " Only supput non-smooth tkw1!");
@@ -681,7 +783,14 @@ void fmoe_g1u1_tkw1(torch::Tensor& out,                            // [token_cnt
         else
             TORCH_CHECK(false, __func__, ": unsupport current activation type");
     }
-    impl_ptr = get_heuristic_kernel(down.size(2), estimated_sub_X_cnt, config_map);
+    impl_ptr = get_heuristic_kernel(down.size(2), estimated_sub_X_cnt, config_map, hStream, 0);
+    {
+        std::unique_lock<std::mutex> hfile_log(hlog_mutex);
+        std::ofstream heuristic_log;
+        heuristic_log.open("heuristic_log.log", std::ios::app);
+        heuristic_log << hStream.str();
+        heuristic_log.close();
+    }
     impl_ptr->launch_kernel<uint8_t, uint16_t>(out,
                                                input,
                                                gate,

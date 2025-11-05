@@ -8,6 +8,7 @@ import aiter
 from aiter import logger
 from aiter import pertoken_quant, get_hip_quant
 from aiter import ActivationType, QuantType, dtypes
+from aiter.fused_moe import fused_moe
 
 BLOCK_SIZE_M = 32
 
@@ -264,6 +265,12 @@ def asm_moe_tkw1(
     expert_mask=None,
     activation=ActivationType.Silu,
 ):
+    return fused_moe(
+        hidden_states, w1, w2, topk_weight, topk_ids, activation=activation,
+        doweight_stage1=False,
+        w1_scale=fc1_scale, w2_scale=fc2_scale,
+        a1_scale=fc1_smooth_scale, a2_scale=fc2_smooth_scale
+    )
     E, model_dim, inter_dim = w2.shape
     global_E = E
     if expert_mask is not None:
@@ -374,6 +381,7 @@ def asm_moe_tkw1(
                 logger.warning("FMOE fall into pure torch quant...")
                 a8, a8_scale = aiter.pertoken_quant(hidden_states, quant_dtype=w1.dtype)
         if w2.shape[2] * 2 * lastdim_mul == w1.shape[1]:
+            print("AITER SHOULD CALL HERE")
             fmoe_func = aiter.fmoe_g1u1_tkw1
 
         else:
